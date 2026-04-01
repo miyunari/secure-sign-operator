@@ -127,16 +127,24 @@ func (i initJobAction) resolveServiceURLs(ctx context.Context, instance *rhtasv1
 	if instance.Spec.SigningConfigURLMode == rhtasv1alpha1.SigningConfigURLInternal {
 		return nil
 	}
-	services := []struct {
+
+	// Only resolve ingress URLs for services that have a corresponding key configured
+	type service struct {
 		address     *string
 		ingressName string
 		suffix      string
-	}{
-		{&instance.Spec.Fulcio.Address, fulcio.DeploymentName, ""},
-		{&instance.Spec.Rekor.Address, rekor.ServerDeploymentName, ""},
-		{&instance.Spec.Tsa.Address, tsa.DeploymentName, tsa.TimestampPath},
+		keyName     string
 	}
-	for _, svc := range services {
+	allServices := []service{
+		{&instance.Spec.Fulcio.Address, fulcio.DeploymentName, "", "fulcio_v1.crt.pem"},
+		{&instance.Spec.Rekor.Address, rekor.ServerDeploymentName, "", "rekor.pub"},
+		{&instance.Spec.Tsa.Address, tsa.DeploymentName, tsa.TimestampPath, "tsa.certchain.pem"},
+	}
+
+	for _, svc := range allServices {
+		if !hasKey(instance.Spec.Keys, svc.keyName) {
+			continue
+		}
 		if *svc.address == "" {
 			if url, err := i.resolveURLFromIngress(ctx, svc.ingressName, instance.Namespace); err == nil {
 				*svc.address = url + svc.suffix
@@ -146,6 +154,15 @@ func (i initJobAction) resolveServiceURLs(ctx context.Context, instance *rhtasv1
 		}
 	}
 	return nil
+}
+
+func hasKey(keys []rhtasv1alpha1.TufKey, name string) bool {
+	for _, key := range keys {
+		if key.Name == name {
+			return true
+		}
+	}
+	return false
 }
 
 func (i initJobAction) resolveURLFromIngress(ctx context.Context, ingressName, namespace string) (string, error) {
